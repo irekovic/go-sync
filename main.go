@@ -53,13 +53,17 @@ func main() {
 		flag.Usage()
 		os.Exit(-2)
 	}
-	changes := make(chan fileChange, 1000)
 
+	// channel to communicate file changes
+	changes := make(chan fileChange, 1000)
+	// os watcher
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		panic(err)
+		log.Err(err).Msg("unable to create os watcher")
 	}
 
+	// "thread" that is listening on os notifications and
+	// translates them into fileChange events
 	go func() {
 		for fc := range watcher.Events {
 			// fmt.Println(fc)
@@ -72,16 +76,18 @@ func main() {
 		}
 	}()
 
-	// rootPath, err := filepath.Abs("/Users/river/Documents/vagavaga/")
 	rootPath = filepath.Clean(rootPath)
-
+	// open metadata store in monitored folder
 	repo, err := metadata.Open(rootPath)
 	if err != nil {
-		panic(err)
+		log.Panic().Msgf("unable to open metadata store: %s", err.Error())
 	}
 
+	// channal for changes that must end up on cloud
 	tocloud := make(chan fileChange)
+
 	// MAIN HANDLER LOOP - HANDLING SYNCING
+	// this routine (thread) is dealing with metadata and
 	go func() {
 		for fi := range changes {
 			// fmt.Println(fi)
@@ -114,34 +120,15 @@ func main() {
 		}
 	}()
 
+	// handle interactions with destination - uploads and deletes against cloud
 	go func() {
 		b, err := blob.OpenBucket(context.Background(), *bucketURL)
 		if err != nil {
+			// panic because there is no point in continuing to work
+			// if we can't access cloud
 			log.Panic().Msg(err.Error())
 		}
 		defer b.Close()
-
-		// var list func(context.Context, *blob.Bucket, string)
-		// list = func(ctx context.Context, b *blob.Bucket, prefix string) {
-		// 	iter := b.List(&blob.ListOptions{
-		// 		Delimiter: "/",
-		// 		Prefix:    prefix,
-		// 	})
-		// 	for {
-		// 		obj, err := iter.Next(ctx)
-		// 		if err == io.EOF {
-		// 			break
-		// 		}
-		// 		if err != nil {
-		// 			log.Fatal().Msgf("unexpected error:%v", err)
-		// 		}
-		// 		fmt.Printf("%s\n", obj.Key)
-		// 		if obj.IsDir {
-		// 			list(ctx, b, obj.Key)
-		// 		}
-		// 	}
-		// }
-		// list(context.Background(), b, "")
 
 		for fi := range tocloud {
 			fname, _ := filepath.Rel(rootPath, fi.name)
@@ -154,6 +141,8 @@ func main() {
 			}
 		}
 	}()
+
+	// walk function - it is using trackingSet to track for deletes in between runs.
 	trackingSet := make(map[string]struct{})
 	walkFilepath := func() {
 		log.Info().Msg("start walking")
@@ -185,15 +174,19 @@ func main() {
 		trackingSet = visited
 
 	}
-	walkFilepath()
 
 	ticker := time.NewTicker(time.Minute * 1)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	// Routine running walk at start, and than at every timer pulse (1minute currentl)
+	go func() {
 		walkFilepath()
-	}
+		for range ticker.C {
+			walkFilepath()
+		}
+	}()
 
+	// Block main routine untill we receive one of the signals:
 	//SIGHUP, SIGINT, or SIGTERM
 	signals := make(chan os.Signal)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
