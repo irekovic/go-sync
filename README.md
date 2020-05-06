@@ -64,6 +64,6 @@ And credentials can be provided in following environment variables:
 
 Will monitor folder/to/monitor and sync it's content to local folder on windows C:\\Repo\.
 
-    AZURE_STORAGE_ACCOUNT=xxx AZURE_STORAGE_KEY=yyy go-sync -f c:\\monitored_dir -url:azureblob://az-repo/
+    AZURE_STORAGE_ACCOUNT=xxx AZURE_STORAGE_KEY=yyy go-sync -f c:\\monitored_dir -url:azblob://az-repo/
 
 Will monitor C:\\monitored_dir and sync it with container az-repo that is located on Azure Cloud.
